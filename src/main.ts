@@ -1,5 +1,8 @@
 
 
+const GRID_SIZE = 4;
+const OFFSET_FROM_ORIGIN = 1;
+
 const canvas = document.querySelector('canvas') as HTMLCanvasElement
 
 // Check if device has webGPU support
@@ -49,7 +52,7 @@ context ? context.configure({
 // More advanced uses can provide several textures, called attachments, with various purposes such as storing the depth of rendered geometry or providing antialiasing. For this app, however, you only need one.
 //
 
-const verticies = new Float32Array([
+const vertexArray = new Float32Array([
 	-0.8, -0.8, // triangle 1
 	0.8, -0.8,
 	0.8, 0.8,
@@ -65,12 +68,14 @@ const verticies = new Float32Array([
 //
 const vertexBuffer = device.createBuffer({
 	label: "Cell Verticies", // buffers can be labeled as a way to refer to them will be used when printing out diagnostics materials related to the function.
-	size: verticies.byteLength,
+	size: vertexArray.byteLength,
 	usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 })
 
-device.queue.writeBuffer(vertexBuffer, 0, verticies)
+device.queue.writeBuffer(vertexBuffer, 0, vertexArray)
 // Write to the buffer!
+//
+
 
 const vertexBufferLayout = {
 	// number of bytes the GPU needs to skip forward in the buffer
@@ -83,27 +88,34 @@ const vertexBufferLayout = {
 	}],
 };
 
+// A uniform is a value from a buffer that is the same for every invocation. They're useful for communicating values that are common for a piece of geometry (like its position), a full frame of animation (like the current time), or even the entire lifespan of the app (like a user preference).
+const uniformArray = new Float32Array([GRID_SIZE, GRID_SIZE])
+const uniformBuffer = device.createBuffer({
+	label: "Grid Uniforms",
+	size: uniformArray.byteLength,
+	usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+})
+device.queue.writeBuffer(uniformBuffer, 0, uniformArray)
+
 const cellShaderModule = device.createShaderModule({
 	label: "Cell shader",
 	code: `
+	@group(0) @binding(0) var<uniform> grid: vec2f;
+
 	@vertex
 	fn vertexMain(@location(0) pos: vec2f) -> @builtin(position) vec4f {
-		return vec4f(pos, 0 , 1);
+		let cell = vec2f(3,1);
+		let cellOffset = cell / grid * 2;
+		let gridPosition = (pos + 1) / grid - 1  + cellOffset;
+		return vec4f(gridPosition, 0 , 1);
 	}
 
 	@fragment
 	fn fragmentMain() -> @location(0) vec4f{\
 		return vec4f(0.1, 0.1, 0.1, 1);
-
-
 	}
-
-
-	`
+`
 })
-
-
-
 
 const cellPipeline = device.createRenderPipeline({
 	label: "Cell pipeline",
@@ -122,6 +134,16 @@ const cellPipeline = device.createRenderPipeline({
 	}
 });
 
+const bindGroup = device.createBindGroup({
+	label: "Cell renderer bind group",
+	layout: cellPipeline.getBindGroupLayout(0),
+	entries: [{
+		binding: 0,
+		resource: { buffer: uniformBuffer }
+	}],
+
+})
+
 const encoder = device.createCommandEncoder();
 const pass1 = encoder.beginRenderPass({
 	colorAttachments: [{
@@ -134,8 +156,8 @@ const pass1 = encoder.beginRenderPass({
 })
 pass1.setPipeline(cellPipeline)
 pass1.setVertexBuffer(0, vertexBuffer)
-pass1.draw(verticies.length / 2)
-console.log(verticies.length)
+pass1.setBindGroup(0, bindGroup)
+pass1.draw(vertexArray.length / 2)
 
 
 
